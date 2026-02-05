@@ -4,8 +4,8 @@ import aboutDestinyLogo from './assets/about-destiny-logo.svg';
 
 export const DEFAULT_PIPELINE: Pipeline = {
   id: 'p1',
-  name: 'Standard Travel Sale',
-  stages: ['NOVO', 'BRIEFING', 'PROPOSTA', 'NEGOCIAÇÃO', 'FECHADO']
+  name: 'Pipeline Comercial',
+  stages: ['Carteira', 'Proposta Enviada', '1º Follow up', '2º Follow up', 'Ganho', 'Perdido']
 };
 
 export const AGENCY_PROFILE = {
@@ -142,7 +142,7 @@ export const MOCK_OPPORTUNITIES: Opportunity[] = [
     id: 'o1',
     clientId: 'c1',
     pipelineId: 'p1',
-    stage: 'FECHADO',
+    stage: 'Ganho',
     status: OpportunityStatus.WON,
     limitValue: 5800,
     estimatedMargin: 870,
@@ -207,7 +207,44 @@ export const MOCK_OPPORTUNITIES: Opportunity[] = [
 ];
 
 export const MOCK_EMPLOYEES: Employee[] = [
-  { id: 'e1', name: 'Bruno Ferreira', email: 'bruno@agencia.pt', phone: '+351 910 000 111', role: EmployeeRole.MANAGER, status: 'Ativo', avatarSeed: 'Bruno', joinedAt: '2022-01-10' }
+  {
+    id: 'e1',
+    name: 'Bruno Ferreira',
+    email: 'bruno@agencia.pt',
+    phone: '+351 910 000 111',
+    role: EmployeeRole.MANAGER,
+    status: 'Ativo',
+    avatarSeed: 'Bruno',
+    joinedAt: '2022-01-10',
+    primaryTasks: ['Coordenação da equipa', 'Validação de propostas críticas'],
+    secondaryTasks: ['Formação interna', 'Escala de atendimento'],
+    workSchedule: 'Seg-Sex 09:00 - 18:00',
+    workLocation: 'Lisboa',
+    accessPassword: 'gestor2026',
+    timeClockPin: '1234',
+    timeClockEntries: [],
+    mission: 'Garantir uma operação comercial previsível e uma equipa de consultoria de alto desempenho.',
+    measurableObjectives: [
+      {
+        id: 'obj-1',
+        title: 'Taxa de fecho mensal',
+        metric: 'Percentagem de propostas fechadas',
+        targetValue: 35,
+        currentValue: 24,
+        unit: '%',
+        dueDate: '2026-12-31',
+      },
+      {
+        id: 'obj-2',
+        title: 'NPS de clientes',
+        metric: 'Pontuação média de satisfação',
+        targetValue: 9,
+        currentValue: 8.2,
+        unit: 'pts',
+        dueDate: '2026-12-31',
+      },
+    ],
+  }
 ];
 
 export const MOCK_CAMPAIGNS: Campaign[] = [

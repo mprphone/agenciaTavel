@@ -22,6 +22,17 @@ interface Props {
   onClose: () => void;
 }
 
+const normalizePipelineStage = (stage: string, status: OpportunityStatus) => {
+  if (stage === 'Carteira' || stage === 'Proposta Enviada' || stage === '1º Follow up' || stage === '2º Follow up' || stage === 'Ganho' || stage === 'Perdido') {
+    return stage;
+  }
+  if (stage === 'NOVO' || stage === 'BRIEFING') return 'Carteira';
+  if (stage === 'PROPOSTA') return 'Proposta Enviada';
+  if (stage === 'NEGOCIAÇÃO') return '1º Follow up';
+  if (stage === 'FECHADO') return status === OpportunityStatus.LOST ? 'Perdido' : 'Ganho';
+  return 'Carteira';
+};
+
 const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose }) => {
   const { updateOpportunity, moveOpportunityStage, checkStageRequirements, analyzeWithAI, generateDraftWithAI, addAttachment, suppliers, updateSupplier } = useApp();
   const [activeTab, setActiveTab] = useState<string>('proposals');
@@ -59,12 +70,15 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
   };
   const summaryFocus = summaryFocusMap[newOptionLabel] || 'Equilíbrio';
 
-  const currentStageIndex = DEFAULT_PIPELINE.stages.indexOf(opportunity.stage);
+  const currentPipelineStage = normalizePipelineStage(opportunity.stage, opportunity.status);
+  const isFollowUpStage = currentPipelineStage === '1º Follow up' || currentPipelineStage === '2º Follow up';
+  const isClosedStage = currentPipelineStage === 'Ganho' || currentPipelineStage === 'Perdido';
+  const currentStageIndex = DEFAULT_PIPELINE.stages.indexOf(currentPipelineStage);
   const nextStage = DEFAULT_PIPELINE.stages[currentStageIndex + 1];
   const { met, missing } = nextStage
     ? checkStageRequirements(opportunity, nextStage as any)
     : { met: true, missing: [] as string[] };
-  const needsEmailForNegotiation = nextStage === 'NEGOCIAÇÃO' && !opportunity.proposalSentAt;
+  const needsEmailForNegotiation = nextStage === '1º Follow up' && !opportunity.proposalSentAt;
   const canAdvanceStage = met && !needsEmailForNegotiation;
   const proposalWorkflowStatus: 'idle' | 'draft' | 'finalized' = opportunity.proposalStatus
     ? opportunity.proposalStatus
@@ -72,10 +86,10 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
     ? 'draft'
     : 'idle';
   const proposalIsFinalized = proposalWorkflowStatus === 'finalized';
-  const proposalIsEditable = !proposalIsFinalized || opportunity.stage === 'NEGOCIAÇÃO';
+  const proposalIsEditable = !proposalIsFinalized || isFollowUpStage;
   const hasAcceptedProposal = opportunity.proposalOptions.some(option => option.isAccepted);
   const acceptedOption = opportunity.proposalOptions.find(option => option.isAccepted);
-  const isClosedWon = opportunity.stage === 'FECHADO' && opportunity.status === OpportunityStatus.WON;
+  const isClosedWon = currentPipelineStage === 'Ganho' && opportunity.status === OpportunityStatus.WON;
   const showSuppliersBoard = isClosedWon && hasAcceptedProposal;
   const supplierBookings = opportunity.supplierBookings || [];
   const totalPax = (opportunity.adults || 0) + (opportunity.children || 0);
@@ -269,7 +283,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
       return;
     }
 
-    const shouldSendNow = !opportunity.proposalSentAt && opportunity.stage !== 'NEGOCIAÇÃO' && opportunity.stage !== 'FECHADO';
+    const shouldSendNow = !opportunity.proposalSentAt && !isFollowUpStage && !isClosedStage;
     if (shouldSendNow && !client?.email) {
       alert('Este cliente não tem email registado.');
       return;
@@ -286,11 +300,11 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
         proposalFinalizedAt: now,
         proposalSentAt: sentAt,
         lastInteractionAt: now,
-        ...(shouldSendNow ? { stage: 'NEGOCIAÇÃO' } : {}),
+        ...(shouldSendNow ? { stage: '1º Follow up' } : {}),
         history: appendHistory(
           shouldSendNow
-            ? `Proposta finalizada e enviada por email para ${client?.email}. Estado avançado para NEGOCIAÇÃO`
-            : opportunity.stage === 'NEGOCIAÇÃO'
+            ? `Proposta finalizada e enviada por email para ${client?.email}. Estado avançado para 1º Follow up`
+            : isFollowUpStage
             ? 'Revisão da proposta finalizada durante negociação'
             : 'Proposta finalizada'
         ),
@@ -299,7 +313,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
       setTimeout(() => handleExportPDF(), 150);
       setActiveTab('proposals');
       if (shouldSendNow) {
-        alert(`Proposta enviada para ${client?.email} e oportunidade avançada para NEGOCIAÇÃO.`);
+        alert(`Proposta enviada para ${client?.email} e oportunidade avançada para 1º Follow up.`);
       }
     } finally {
       setIsSendingEmail(false);
@@ -367,12 +381,12 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
   const handleCreateLevelOption = (level: 'Eco' | 'Premium' | 'Luxo') => {
     if (!proposalIsEditable) return;
     const newOption = createEmptyProposalOption(level);
-    const isEarlyStage = opportunity.stage === 'NOVO' || opportunity.stage === 'BRIEFING';
+    const isEarlyStage = currentPipelineStage === 'Carteira';
     updateOpportunity(opportunity.id, {
       proposalOptions: [...opportunity.proposalOptions, newOption],
       proposalStatus: 'draft',
       proposalFinalizedAt: undefined,
-      ...(isEarlyStage ? { stage: 'PROPOSTA' } : {}),
+      ...(isEarlyStage ? { stage: 'Proposta Enviada' } : {}),
     });
   };
 
@@ -387,12 +401,12 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
     }
 
     const newOption = createEmptyProposalOption(newOptionLabel, optionTitle, optionDescription);
-    const isEarlyStage = opportunity.stage === 'NOVO' || opportunity.stage === 'BRIEFING';
+    const isEarlyStage = currentPipelineStage === 'Carteira';
     updateOpportunity(opportunity.id, {
       proposalOptions: [...opportunity.proposalOptions, newOption],
       proposalStatus: 'draft',
       proposalFinalizedAt: undefined,
-      ...(isEarlyStage ? { stage: 'PROPOSTA' } : {}),
+      ...(isEarlyStage ? { stage: 'Proposta Enviada' } : {}),
     });
 
     setNewOptionTitle('');
@@ -436,12 +450,12 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
   };
 
   const handleInsertProposal = () => {
-    const shouldMoveToProposal = opportunity.stage === 'NOVO' || opportunity.stage === 'BRIEFING';
+    const shouldMoveToProposal = currentPipelineStage === 'Carteira';
     updateOpportunity(opportunity.id, {
       proposalStatus: 'draft',
       proposalFinalizedAt: undefined,
       proposalSentAt: undefined,
-      ...(shouldMoveToProposal ? { stage: 'PROPOSTA' } : {}),
+      ...(shouldMoveToProposal ? { stage: 'Proposta Enviada' } : {}),
       ...(shouldMoveToProposal && !opportunity.quoteExpiry ? { quoteExpiry: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() } : {}),
     });
     setIsCreatingOption(true);
@@ -464,7 +478,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
     if (!window.confirm('Confirmar fecho da oportunidade como ACEITE?')) return;
     const now = new Date().toISOString();
     await updateOpportunity(opportunity.id, {
-      stage: 'FECHADO',
+      stage: 'Ganho',
       status: OpportunityStatus.WON,
       temperature: 100,
       proposalStatus: 'finalized',
@@ -480,7 +494,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
     if (!window.confirm('Confirmar fecho da oportunidade como NÃO ACEITE?')) return;
     const now = new Date().toISOString();
     await updateOpportunity(opportunity.id, {
-      stage: 'FECHADO',
+      stage: 'Perdido',
       status: OpportunityStatus.LOST,
       temperature: 10,
       tasks: [],
@@ -820,7 +834,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
 
           <div className="flex items-center gap-2">
             {DEFAULT_PIPELINE.stages.map((stage, idx) => {
-              const isActive = stage === opportunity.stage;
+              const isActive = stage === currentPipelineStage;
               const isPast = DEFAULT_PIPELINE.stages.indexOf(stage) < currentStageIndex;
               return (
                 <React.Fragment key={stage}>
@@ -844,7 +858,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
                 {canAdvanceStage
                   ? `Pronto para ${nextStage}`
                   : needsEmailForNegotiation
-                  ? 'Finalize a proposta e envie o email ao cliente para avançar para NEGOCIAÇÃO.'
+                  ? 'Finalize a proposta e envie o email ao cliente para avançar para 1º Follow up.'
                   : `Falta: ${missing.join(', ')}`}
               </p>
             </div>
@@ -1021,7 +1035,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
                             disabled={!opportunity.proposalOptions.length || isSendingEmail}
                             className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-green-600 text-white hover:bg-green-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            {isSendingEmail ? 'A enviar...' : (opportunity.stage === 'NEGOCIAÇÃO' ? 'Finalizar Revisão' : 'Finalizar e Enviar')}
+                            {isSendingEmail ? 'A enviar...' : (isFollowUpStage ? 'Finalizar Revisão' : 'Finalizar e Enviar')}
                           </button>
                         )}
                         <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Eco • Premium • Luxo</p>
@@ -1235,7 +1249,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
                   </div>
                 )}
 
-                {opportunity.stage === 'NEGOCIAÇÃO' && (
+                {isFollowUpStage && (
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 print:hidden">
                     <div className="bg-white border border-gray-100 rounded-[2.5rem] p-7 shadow-sm">
                       <h4 className="text-lg font-black text-gray-900 mb-1">Lembretes e Alertas de Negociação</h4>
@@ -1297,7 +1311,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
                   </div>
                 )}
 
-                {opportunity.stage === 'NEGOCIAÇÃO' && (
+                {isFollowUpStage && (
                   <div className="bg-white border border-gray-100 rounded-[2.5rem] p-7 shadow-sm print:hidden">
                     <h4 className="text-lg font-black text-gray-900 mb-1">Fecho da Negociação</h4>
                     <p className="text-xs text-gray-500 font-medium mb-5">
@@ -1464,7 +1478,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
                            </div>
 
                            <div className="p-8 pt-0 print:hidden">
-                              {opportunity.stage === 'NEGOCIAÇÃO' && !opt.isAccepted && (
+                              {isFollowUpStage && !opt.isAccepted && (
                                 <button 
                                   onClick={() => handleAcceptProposal(opt.id)} 
                                   className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-gray-800 transition shadow-xl active:scale-95"
@@ -1736,7 +1750,7 @@ const OpportunityDetailModal: React.FC<Props> = ({ opportunity, client, onClose 
                <button className="w-full py-4 bg-blue-50 text-blue-600 border border-blue-100 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-blue-100 transition">
                   <ExternalLink size={16} /> Link Direto Proposta
                </button>
-               {opportunity.stage !== 'FECHADO' && (
+               {!isClosedStage && (
                  <button className="w-full py-4 text-red-400 text-[10px] font-black uppercase tracking-widest hover:text-red-600 transition">
                     Descartar Oportunidade
                  </button>

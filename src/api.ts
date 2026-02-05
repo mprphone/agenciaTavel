@@ -3,6 +3,9 @@ import {
   Client,
   Opportunity,
   Employee,
+  EmployeeTimeClockEntry,
+  EmployeeObjective,
+  EmployeeRole,
   Campaign,
   Supplier,
   ProposalOption,
@@ -21,6 +24,7 @@ import {
   AiDraft,
   CommChannel,
   ServiceType,
+  TeamChatMessage,
 } from './types';
 
 const ensureSupabase = () => {
@@ -109,6 +113,86 @@ const mapCampaignRow = (row: any): Campaign => ({
   owner: row.owner || undefined,
   status: row.status || 'Ativa',
   createdAt: row.created_at || new Date().toISOString(),
+});
+
+const mapEmployeeTimeClockEntry = (entry: any, index: number): EmployeeTimeClockEntry => ({
+  id: entry?.id || `${entry?.timestamp || 'clock'}-${index}`,
+  type: entry?.type === 'saida' ? 'saida' : 'entrada',
+  timestamp: entry?.timestamp || new Date().toISOString(),
+  source: entry?.source === 'manual' ? 'manual' : 'pin',
+  note: typeof entry?.note === 'string' && entry.note.trim() ? entry.note : undefined,
+});
+
+const mapEmployeeObjective = (objective: any, index: number): EmployeeObjective => ({
+  id: objective?.id || `${objective?.title || 'objective'}-${index}`,
+  title: objective?.title || '',
+  metric: objective?.metric || '',
+  targetValue: toNumber(objective?.targetValue ?? objective?.target_value),
+  currentValue: toNumber(objective?.currentValue ?? objective?.current_value),
+  unit: typeof objective?.unit === 'string' && objective.unit.trim() ? objective.unit : undefined,
+  dueDate: typeof objective?.dueDate === 'string'
+    ? objective.dueDate
+    : typeof objective?.due_date === 'string'
+    ? objective.due_date
+    : undefined,
+});
+
+const mapEmployeeRow = (row: any): Employee => ({
+  id: row.id,
+  name: row.name,
+  email: row.email,
+  phone: row.phone || '',
+  role: row.role || EmployeeRole.CONSULTANT,
+  status: row.status || 'Ativo',
+  avatarSeed: row.avatar_seed || row.name,
+  joinedAt: row.joined_at || new Date().toISOString(),
+  primaryTasks: Array.isArray(row.primary_tasks)
+    ? row.primary_tasks.filter((task: any) => typeof task === 'string' && task.trim())
+    : [],
+  secondaryTasks: Array.isArray(row.secondary_tasks)
+    ? row.secondary_tasks.filter((task: any) => typeof task === 'string' && task.trim())
+    : [],
+  workSchedule: row.work_schedule || undefined,
+  workLocation: row.work_location || undefined,
+  accessPassword: row.access_password || undefined,
+  timeClockPin: row.time_clock_pin || undefined,
+  timeClockEntries: Array.isArray(row.time_clock_entries)
+    ? row.time_clock_entries.map(mapEmployeeTimeClockEntry)
+    : [],
+  mission: row.mission || undefined,
+  measurableObjectives: Array.isArray(row.measurable_objectives)
+    ? row.measurable_objectives.map(mapEmployeeObjective)
+    : [],
+});
+
+const mapEmployeePatch = (updates: Partial<Employee>) => {
+  const patch: Record<string, any> = {};
+  if ('name' in updates) patch.name = updates.name;
+  if ('email' in updates) patch.email = updates.email;
+  if ('phone' in updates) patch.phone = updates.phone;
+  if ('role' in updates) patch.role = updates.role;
+  if ('status' in updates) patch.status = updates.status;
+  if ('avatarSeed' in updates) patch.avatar_seed = updates.avatarSeed;
+  if ('joinedAt' in updates) patch.joined_at = updates.joinedAt;
+  if ('primaryTasks' in updates) patch.primary_tasks = updates.primaryTasks || [];
+  if ('secondaryTasks' in updates) patch.secondary_tasks = updates.secondaryTasks || [];
+  if ('workSchedule' in updates) patch.work_schedule = updates.workSchedule || null;
+  if ('workLocation' in updates) patch.work_location = updates.workLocation || null;
+  if ('accessPassword' in updates) patch.access_password = updates.accessPassword || null;
+  if ('timeClockPin' in updates) patch.time_clock_pin = updates.timeClockPin || null;
+  if ('timeClockEntries' in updates) patch.time_clock_entries = updates.timeClockEntries || [];
+  if ('mission' in updates) patch.mission = updates.mission || null;
+  if ('measurableObjectives' in updates) patch.measurable_objectives = updates.measurableObjectives || [];
+  return patch;
+};
+
+const mapTeamChatRow = (row: any): TeamChatMessage => ({
+  id: row.id,
+  senderId: row.sender_id || undefined,
+  senderName: row.sender_name || 'Equipa',
+  text: row.text || '',
+  createdAt: row.created_at || new Date().toISOString(),
+  channel: row.channel || 'geral',
 });
 
 const mapIncidentRow = (row: any): SupplierIncident => ({
@@ -936,16 +1020,7 @@ export const TravelAPI = {
     ensureSupabase();
     const { data, error } = await supabase.from('employees').select('*').order('created_at', { ascending: false });
     if (error) throw error;
-    return (data || []).map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      email: row.email,
-      phone: row.phone || '',
-      role: row.role,
-      status: row.status || 'Ativo',
-      avatarSeed: row.avatar_seed || row.name,
-      joinedAt: row.joined_at || new Date().toISOString(),
-    }));
+    return (data || []).map(mapEmployeeRow);
   },
 
   async saveEmployee(employee: Employee): Promise<Employee> {
@@ -959,10 +1034,68 @@ export const TravelAPI = {
       status: employee.status,
       avatar_seed: employee.avatarSeed,
       joined_at: employee.joinedAt || new Date().toISOString(),
+      primary_tasks: employee.primaryTasks || [],
+      secondary_tasks: employee.secondaryTasks || [],
+      work_schedule: employee.workSchedule || null,
+      work_location: employee.workLocation || null,
+      access_password: employee.accessPassword || null,
+      time_clock_pin: employee.timeClockPin || null,
+      time_clock_entries: employee.timeClockEntries || [],
+      mission: employee.mission || null,
+      measurable_objectives: employee.measurableObjectives || [],
     };
     const { error } = await supabase.from('employees').insert(payload);
     if (error) throw error;
-    return employee;
+    const { data, error: fetchError } = await supabase.from('employees').select('*').eq('id', employee.id).single();
+    if (fetchError) throw fetchError;
+    return mapEmployeeRow(data);
+  },
+
+  async updateEmployee(id: string, updates: Partial<Employee>): Promise<Employee> {
+    ensureSupabase();
+    const patch = mapEmployeePatch(updates);
+    if (Object.keys(patch).length) {
+      const { error } = await supabase.from('employees').update(patch).eq('id', id);
+      if (error) throw error;
+    }
+
+    const { data, error } = await supabase.from('employees').select('*').eq('id', id).single();
+    if (error) throw error;
+    return mapEmployeeRow(data);
+  },
+
+  // --- TEAM CHAT ---
+  async getTeamChatMessages(): Promise<TeamChatMessage[]> {
+    ensureSupabase();
+    const { data, error } = await supabase
+      .from('team_chat_messages')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data || []).map(mapTeamChatRow);
+  },
+
+  async saveTeamChatMessage(message: TeamChatMessage): Promise<TeamChatMessage> {
+    ensureSupabase();
+    const payload = {
+      id: message.id,
+      sender_id: message.senderId || null,
+      sender_name: message.senderName,
+      text: message.text,
+      channel: message.channel || 'geral',
+      created_at: message.createdAt || new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from('team_chat_messages').insert(payload);
+    if (error) throw error;
+
+    const { data, error: fetchError } = await supabase
+      .from('team_chat_messages')
+      .select('*')
+      .eq('id', message.id)
+      .single();
+    if (fetchError) throw fetchError;
+    return mapTeamChatRow(data);
   },
 
   // --- CAMPAIGNS ---

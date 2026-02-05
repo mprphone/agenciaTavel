@@ -16,11 +16,24 @@ import {
   PaymentStatus,
   AuditLog,
   CommChannel,
+  TeamChatMessage,
+  TeamChatMessageInput,
 } from './types';
 import { DEFAULT_PIPELINE } from './constants';
 import { TravelAPI } from './api';
 
-type Stage = 'NOVO' | 'BRIEFING' | 'PROPOSTA' | 'NEGOCIAÇÃO' | 'FECHADO';
+type Stage =
+  | 'Carteira'
+  | 'Proposta Enviada'
+  | '1º Follow up'
+  | '2º Follow up'
+  | 'Ganho'
+  | 'Perdido'
+  | 'NOVO'
+  | 'BRIEFING'
+  | 'PROPOSTA'
+  | 'NEGOCIAÇÃO'
+  | 'FECHADO';
 
 type StageCheck = { met: boolean; missing: string[] };
 
@@ -32,6 +45,7 @@ interface AppContextType {
   clients: Client[];
   opportunities: Opportunity[];
   employees: Employee[];
+  teamChatMessages: TeamChatMessage[];
   campaigns: Campaign[];
   suppliers: Supplier[];
   isLoading: boolean;
@@ -43,6 +57,9 @@ interface AppContextType {
   moveOpportunityStage: (id: string, targetStage: Stage, meta?: { reason?: string }) => Promise<StageMoveResult>;
 
   addEmployee: (employee: Employee) => Promise<void>;
+  updateEmployee: (id: string, updates: Partial<Employee>) => Promise<void>;
+  sendTeamChatMessage: (input: TeamChatMessageInput) => Promise<void>;
+  refreshTeamChatMessages: () => Promise<void>;
   generateProposals: (opportunity: Opportunity) => ProposalOption[];
   checkStageRequirements: (opp: Opportunity, targetStage: Stage) => StageCheck;
 
@@ -59,6 +76,18 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const uid = () => Math.random().toString(36).slice(2, 9);
+
+const normalizeStageName = (stage: string | undefined, status?: OpportunityStatus): Stage => {
+  if (!stage) return 'Carteira';
+  if (stage === 'Carteira' || stage === 'Proposta Enviada' || stage === '1º Follow up' || stage === '2º Follow up' || stage === 'Ganho' || stage === 'Perdido') {
+    return stage;
+  }
+  if (stage === 'NOVO' || stage === 'BRIEFING') return 'Carteira';
+  if (stage === 'PROPOSTA') return 'Proposta Enviada';
+  if (stage === 'NEGOCIAÇÃO') return '1º Follow up';
+  if (stage === 'FECHADO') return status === OpportunityStatus.LOST ? 'Perdido' : 'Ganho';
+  return 'Carteira';
+};
 
 const daysFromNow = (d: number) => {
   const now = new Date();
@@ -95,28 +124,32 @@ const buildPaymentPlan = (opp: Opportunity): PaymentMilestone[] => {
 };
 
 const createAutoTasks = (opp: Opportunity, newStage: Stage): Task[] => {
+  const normalizedStage = normalizeStageName(newStage, opp.status);
   const tasks: Task[] = [...(opp.tasks || [])];
   const pushIfMissing = (title: string, dueDate: string, type: Task['type']) => {
     const exists = tasks.some(t => t.title === title && !t.isCompleted);
     if (!exists) tasks.push({ id: uid(), title, dueDate, isCompleted: false, type });
   };
 
-  if (newStage === 'BRIEFING') {
+  if (normalizedStage === 'Carteira') {
     pushIfMissing('Completar briefing (datas, orçamento, motivo)', daysFromNow(1), 'other');
   }
 
-  if (newStage === 'PROPOSTA') {
+  if (normalizedStage === 'Proposta Enviada') {
     pushIfMissing('Enviar proposta (link/app ou PDF)', daysFromNow(0), 'document');
     pushIfMissing('Follow-up 24h: confirmar receção e dúvidas', daysFromNow(1), 'follow-up');
     pushIfMissing('Follow-up 72h: decisão/ajustes', daysFromNow(3), 'follow-up');
   }
 
-  if (newStage === 'NEGOCIAÇÃO') {
-    pushIfMissing('Rever objeções (preço/datas/hotel) e criar versão 2', daysFromNow(1), 'other');
-    pushIfMissing('Follow-up 24h: enviar alternativa/ajuste', daysFromNow(1), 'follow-up');
+  if (normalizedStage === '1º Follow up') {
+    pushIfMissing('1º Follow-up: confirmar receção da proposta e dúvidas', daysFromNow(1), 'follow-up');
   }
 
-  if (newStage === 'FECHADO') {
+  if (normalizedStage === '2º Follow up') {
+    pushIfMissing('2º Follow-up: decisão final / última revisão', daysFromNow(2), 'follow-up');
+  }
+
+  if (normalizedStage === 'Ganho') {
     pushIfMissing('Confirmar reservas e emitir vouchers', daysFromNow(0), 'other');
     pushIfMissing('Validar pagamentos e plano financeiro', daysFromNow(0), 'payment');
     pushIfMissing('Checklist pré-viagem (documentos, seguros, check-in)', daysFromNow(2), 'document');
@@ -135,6 +168,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [clients, setClients] = useState<Client[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [teamChatMessages, setTeamChatMessages] = useState<TeamChatMessage[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -142,16 +176,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     const initData = async () => {
       try {
-        const [c, o, e, camps, sups] = await Promise.all([
+        const [c, o, e, chat, camps, sups] = await Promise.all([
           TravelAPI.getClients(),
           TravelAPI.getOpportunities(),
           TravelAPI.getEmployees(),
+          TravelAPI.getTeamChatMessages().catch(error => {
+            console.warn('Chat da equipa indisponível (verifique migration da tabela team_chat_messages):', error);
+            return [];
+          }),
           TravelAPI.getCampaigns(),
           TravelAPI.getSuppliers(),
         ]);
         setClients(c);
         setOpportunities(o);
         setEmployees(e);
+        setTeamChatMessages(chat);
         setCampaigns(camps);
         setSuppliers(sups);
       } catch (err) {
@@ -167,6 +206,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const isAutoAlertRunning = useRef(false);
 
   const ensureDeadlineAlerts = (opp: Opportunity): Partial<Opportunity> | null => {
+    const normalizedStage = normalizeStageName(opp.stage, opp.status);
     const tasks = [...(opp.tasks || [])];
     const now = new Date();
 
@@ -176,7 +216,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     // Proposta a expirar (quoteExpiry)
-    if (opp.quoteExpiry && (opp.stage === 'PROPOSTA' || opp.stage === 'NEGOCIAÇÃO')) {
+    if (opp.quoteExpiry && (normalizedStage === 'Proposta Enviada' || normalizedStage === '1º Follow up' || normalizedStage === '2º Follow up')) {
       const exp = new Date(opp.quoteExpiry);
       const diffHours = (exp.getTime() - now.getTime()) / (1000 * 60 * 60);
       if (diffHours <= 24 && diffHours > 0) {
@@ -274,7 +314,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const analyzeWithAI = async (opp: Opportunity): Promise<string> => {
     const apiKey = (process.env as any).API_KEY as string | undefined;
-    const missing = checkStageRequirements(opp, 'BRIEFING').missing;
+    const missing = checkStageRequirements(opp, 'Carteira').missing;
     const destination = opp.destination || opp.title;
 
     const fallback = () => {
@@ -320,7 +360,7 @@ Dê 3 sugestões estratégicas para o consultor fechar a venda, identifique poss
     // Se não houver chave de API configurada, usamos um gerador local (templates) para o MVP.
     const apiKey = (process.env as any).API_KEY as string | undefined;
 
-    const missingBriefing = checkStageRequirements(opp, 'BRIEFING').missing;
+    const missingBriefing = checkStageRequirements(opp, 'Carteira').missing;
     const pax = (opp.adults || 0) + (opp.children || 0);
     const destination = opp.destination || opp.title;
 
@@ -388,30 +428,33 @@ Dê 3 sugestões estratégicas para o consultor fechar a venda, identifique poss
   };
 
   const checkStageRequirements = (opp: Opportunity, targetStage: Stage): StageCheck => {
+    const normalizedTarget = normalizeStageName(targetStage, opp.status);
     const missing: string[] = [];
     const proposalStatus = opp.proposalStatus || (opp.proposalOptions?.length ? 'draft' : undefined);
 
-    if (targetStage === 'BRIEFING') {
+    if (normalizedTarget === 'Carteira') {
       if (!opp.departureDate) missing.push('Data sugerida (partida)');
       if ((opp.adults || 0) <= 0) missing.push('Nº de adultos');
       if ((opp.limitValue || 0) <= 0) missing.push('Orçamento estimado');
       if (!opp.tripReason) missing.push('Motivo da viagem');
     }
 
-    if (targetStage === 'PROPOSTA') {
-      const briefing = checkStageRequirements(opp, 'BRIEFING');
+    if (normalizedTarget === 'Proposta Enviada') {
+      const briefing = checkStageRequirements(opp, 'Carteira');
       if (!briefing.met) missing.push('Briefing completo');
       if (!opp.proposalOptions || opp.proposalOptions.length === 0) missing.push('Pelo menos 1 opção de proposta');
       if (!opp.quoteExpiry) missing.push('Validade da proposta');
     }
 
-    if (targetStage === 'NEGOCIAÇÃO') {
+    if (normalizedTarget === '1º Follow up' || normalizedTarget === '2º Follow up') {
       if (!opp.proposalOptions || opp.proposalOptions.length === 0) missing.push('Proposta enviada');
       if (proposalStatus !== 'finalized') missing.push('Proposta concluída');
-      if (!opp.tasks?.some(t => t.type === 'follow-up')) missing.push('Follow-up planeado');
+      if (normalizedTarget === '2º Follow up' && !opp.tasks?.some(t => t.type === 'follow-up')) {
+        missing.push('Pelo menos um follow-up registado');
+      }
     }
 
-    if (targetStage === 'FECHADO') {
+    if (normalizedTarget === 'Ganho') {
       if (!opp.proposalOptions?.some(opt => opt.isAccepted)) missing.push('Uma opção marcada como ACEITE');
     }
 
@@ -423,31 +466,42 @@ Dê 3 sugestões estratégicas para o consultor fechar a venda, identifique poss
     if (!currentOpp) return;
 
     let finalUpdates: Partial<Opportunity> = { ...updates };
+    const normalizedCurrentStage = normalizeStageName(currentOpp.stage, currentOpp.status);
 
     // Se o utilizador mudar fase manualmente via updateOpportunity
-    if (updates.stage && updates.stage !== currentOpp.stage) {
-      const target = updates.stage as Stage;
-      if (updates.tasks === undefined) {
-        finalUpdates.tasks = createAutoTasks(currentOpp, target);
+    if (updates.stage) {
+      const normalizedTarget = normalizeStageName(updates.stage, updates.status || currentOpp.status);
+      finalUpdates.stage = normalizedTarget;
+      const hasStageChanged = normalizedTarget !== normalizedCurrentStage;
+
+      if (hasStageChanged && updates.tasks === undefined) {
+        finalUpdates.tasks = createAutoTasks(currentOpp, normalizedTarget);
       }
-      if (updates.history === undefined) {
-        finalUpdates.history = addHistory(currentOpp, `Fase alterada: ${currentOpp.stage} → ${target}`);
+      if (hasStageChanged && updates.history === undefined) {
+        finalUpdates.history = addHistory(currentOpp, `Fase alterada: ${normalizedCurrentStage} → ${normalizedTarget}`);
       }
 
-      const nextIndex = DEFAULT_PIPELINE.stages.indexOf(target);
-      const currentIndex = DEFAULT_PIPELINE.stages.indexOf(currentOpp.stage);
-      if (updates.temperature === undefined) {
-        if (nextIndex > currentIndex) {
-          finalUpdates.temperature = Math.min(100, (currentOpp.temperature || 0) + 15);
-        } else if (nextIndex < currentIndex) {
-          finalUpdates.temperature = Math.max(0, (currentOpp.temperature || 0) - 10);
+      if (hasStageChanged) {
+        const nextIndex = DEFAULT_PIPELINE.stages.indexOf(normalizedTarget);
+        const currentIndex = DEFAULT_PIPELINE.stages.indexOf(normalizedCurrentStage);
+        if (updates.temperature === undefined && nextIndex >= 0 && currentIndex >= 0) {
+          if (nextIndex > currentIndex) {
+            finalUpdates.temperature = Math.min(100, (currentOpp.temperature || 0) + 15);
+          } else if (nextIndex < currentIndex) {
+            finalUpdates.temperature = Math.max(0, (currentOpp.temperature || 0) - 10);
+          }
         }
+        finalUpdates.lastInteractionAt = new Date().toISOString();
       }
-
-      finalUpdates.lastInteractionAt = new Date().toISOString();
+    } else {
+      finalUpdates.stage = normalizedCurrentStage;
     }
 
-    const updated = await TravelAPI.updateOpportunity(id, finalUpdates);
+    const persisted = await TravelAPI.updateOpportunity(id, finalUpdates);
+    const updated = {
+      ...persisted,
+      stage: normalizeStageName(persisted.stage, persisted.status),
+    };
     setOpportunities(prev => prev.map(o => (o.id === id ? updated : o)));
   };
 
@@ -455,36 +509,42 @@ Dê 3 sugestões estratégicas para o consultor fechar a venda, identifique poss
     const opp = opportunities.find(o => o.id === id);
     if (!opp) return { ok: false, reason: 'Oportunidade não encontrada.' };
 
-    const check = checkStageRequirements(opp, targetStage);
-    if (!check.met) {
-      return { ok: false, reason: 'Faltam dados para avançar de fase.', missing: check.missing };
-    }
+    const normalizedCurrentStage = normalizeStageName(opp.stage, opp.status);
+    const normalizedTarget = normalizeStageName(targetStage, opp.status);
+    const now = new Date().toISOString();
 
     const stageUpdate: Partial<Opportunity> = {
-      stage: targetStage,
-      lastInteractionAt: new Date().toISOString(),
-      tasks: createAutoTasks(opp, targetStage),
+      stage: normalizedTarget,
+      lastInteractionAt: now,
+      tasks: createAutoTasks(opp, normalizedTarget),
       history: addHistory(
         opp,
         meta?.reason
-          ? `Fase alterada: ${opp.stage} → ${targetStage} (${meta.reason})`
-          : `Fase alterada: ${opp.stage} → ${targetStage}`,
+          ? `Fase alterada: ${normalizedCurrentStage} → ${normalizedTarget} (${meta.reason})`
+          : `Fase alterada: ${normalizedCurrentStage} → ${normalizedTarget}`,
       ),
     };
 
-    // Defaults úteis ao entrar em PROPOSTA
-    if (targetStage === 'PROPOSTA' && !opp.quoteExpiry) {
+    if (normalizedTarget === 'Proposta Enviada' && !opp.quoteExpiry) {
       stageUpdate.quoteExpiry = daysFromNow(7);
       if (!opp.proposalStatus) stageUpdate.proposalStatus = 'draft';
     }
 
-    // Ao fechar: estado + plano pagamentos (se não existir)
-    if (targetStage === 'FECHADO') {
+    if (normalizedTarget === 'Ganho') {
       stageUpdate.status = OpportunityStatus.WON;
       stageUpdate.temperature = 100;
       stageUpdate.paymentPlan = opp.paymentPlan?.length ? opp.paymentPlan : buildPaymentPlan(opp);
       stageUpdate.proposalStatus = 'finalized';
-      stageUpdate.proposalFinalizedAt = opp.proposalFinalizedAt || new Date().toISOString();
+      stageUpdate.proposalFinalizedAt = opp.proposalFinalizedAt || now;
+    } else if (normalizedTarget === 'Perdido') {
+      stageUpdate.status = OpportunityStatus.LOST;
+      stageUpdate.temperature = Math.min(20, opp.temperature || 20);
+      stageUpdate.lostReason = opp.lostReason || 'Perdido no pipeline';
+    } else if (opp.status === OpportunityStatus.WON || opp.status === OpportunityStatus.LOST || opp.status === OpportunityStatus.ABANDONED) {
+      stageUpdate.status = OpportunityStatus.OPEN;
+      if (normalizedTarget === 'Carteira') {
+        stageUpdate.temperature = Math.max(20, Math.min(50, opp.temperature || 40));
+      }
     }
 
     await updateOpportunity(id, stageUpdate);
@@ -494,6 +554,32 @@ Dê 3 sugestões estratégicas para o consultor fechar a venda, identifique poss
   const addEmployee = async (employee: Employee) => {
     const saved = await TravelAPI.saveEmployee(employee);
     setEmployees(prev => [...prev, saved]);
+  };
+
+  const updateEmployee = async (id: string, updates: Partial<Employee>) => {
+    const updated = await TravelAPI.updateEmployee(id, updates);
+    setEmployees(prev => prev.map(employee => (employee.id === id ? updated : employee)));
+  };
+
+  const refreshTeamChatMessages = async () => {
+    const messages = await TravelAPI.getTeamChatMessages();
+    setTeamChatMessages(messages);
+  };
+
+  const sendTeamChatMessage = async (input: TeamChatMessageInput) => {
+    const message: TeamChatMessage = {
+      id: uid(),
+      senderId: input.senderId || undefined,
+      senderName: input.senderName || 'Equipa',
+      text: input.text.trim(),
+      createdAt: new Date().toISOString(),
+      channel: input.channel || 'geral',
+    };
+
+    if (!message.text) return;
+
+    const saved = await TravelAPI.saveTeamChatMessage(message);
+    setTeamChatMessages(prev => [...prev, saved].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
   };
 
   const addCampaign = async (campaign: Campaign) => {
@@ -589,6 +675,7 @@ Dê 3 sugestões estratégicas para o consultor fechar a venda, identifique poss
         clients,
         opportunities,
         employees,
+        teamChatMessages,
         campaigns,
         suppliers,
         isLoading,
@@ -598,6 +685,9 @@ Dê 3 sugestões estratégicas para o consultor fechar a venda, identifique poss
         updateOpportunity,
         moveOpportunityStage,
         addEmployee,
+        updateEmployee,
+        sendTeamChatMessage,
+        refreshTeamChatMessages,
         generateProposals,
         checkStageRequirements,
         analyzeWithAI,

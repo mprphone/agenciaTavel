@@ -17,6 +17,17 @@ import { Opportunity, OpportunityStatus, CommChannel } from '../types';
 import OpportunityDetailModal from './OpportunityDetailModal';
 import { useApp } from '../AppContext';
 
+const normalizePipelineStage = (opp: Opportunity) => {
+  if (opp.stage === 'Carteira' || opp.stage === 'Proposta Enviada' || opp.stage === '1º Follow up' || opp.stage === '2º Follow up' || opp.stage === 'Ganho' || opp.stage === 'Perdido') {
+    return opp.stage;
+  }
+  if (opp.stage === 'NOVO' || opp.stage === 'BRIEFING') return 'Carteira';
+  if (opp.stage === 'PROPOSTA') return 'Proposta Enviada';
+  if (opp.stage === 'NEGOCIAÇÃO') return '1º Follow up';
+  if (opp.stage === 'FECHADO') return opp.status === OpportunityStatus.LOST ? 'Perdido' : 'Ganho';
+  return 'Carteira';
+};
+
 const OpportunityCard: React.FC<{ opp: Opportunity; onClick: () => void }> = ({ opp, onClick }) => {
   const { clients } = useApp();
   const client = clients.find(c => c.id === opp.clientId);
@@ -231,7 +242,7 @@ const PipelineView = () => {
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
           <div>
             <h1 className="text-4xl font-black text-gray-900 tracking-tighter">Tracking Comercial</h1>
-            <p className="text-gray-500 font-medium">Gestão de briefing, propostas e negociação ativa.</p>
+            <p className="text-gray-500 font-medium">Gestão de carteira, propostas, follow-ups e fechos.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Link
@@ -269,7 +280,7 @@ const PipelineView = () => {
 
         <div className="flex-1 flex gap-3 lg:gap-4 overflow-x-auto pb-6 custom-scrollbar items-start">
         {DEFAULT_PIPELINE.stages.map(stage => {
-          const stageOpps = opportunities.filter(o => o.stage === stage && (stage === 'FECHADO' || o.status !== OpportunityStatus.LOST));
+          const stageOpps = opportunities.filter(o => normalizePipelineStage(o) === stage);
           const isOver = dragOverStage === stage;
           const stageValue = stageOpps.reduce((acc, o) => acc + (o.limitValue || 0), 0);
 
@@ -318,7 +329,7 @@ const PipelineView = () => {
             <div className="p-8 border-b flex justify-between items-center bg-gray-50/80">
               <div>
                 <h2 className="text-2xl font-black text-gray-800 tracking-tight">Novo Lead de Viagem</h2>
-                <p className="text-gray-400 text-sm font-medium">A oportunidade será criada na coluna <b>NOVO</b>.</p>
+                <p className="text-gray-400 text-sm font-medium">A oportunidade será criada na coluna <b>Carteira</b>.</p>
               </div>
               <button type="button" onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-200 rounded-full transition">
                  <X size={28} />

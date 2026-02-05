@@ -12,6 +12,8 @@ import {
   Wallet,
   Compass,
   Target,
+  Clock3,
+  MessageCircle,
   Loader2,
   Building2
 } from 'lucide-react';
@@ -23,6 +25,8 @@ import PaymentsView from './views/PaymentsView';
 import OperationsView from './views/OperationsView';
 import CampaignsView from './views/CampaignsView';
 import SuppliersView from './views/SuppliersView';
+import TimeClockView from './views/TimeClockView';
+import TeamChatView from './views/TeamChatView';
 import { AppProvider, useApp } from './AppContext';
 import { AGENCY_PROFILE } from './constants';
 
@@ -90,6 +94,18 @@ const Sidebar = () => {
         >
           <Users2 size={20} /> Equipa
         </Link>
+        <Link
+          to="/time-clock"
+          className={`flex items-center gap-3 p-3 rounded-xl transition-all duration-200 font-medium ${isActive('/time-clock') ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-500 hover:bg-gray-50'}`}
+        >
+          <Clock3 size={20} /> Pica-Ponto
+        </Link>
+        <Link
+          to="/team-chat"
+          className={`flex items-center gap-3 p-3 rounded-xl transition-all duration-200 font-medium ${isActive('/team-chat') ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-500 hover:bg-gray-50'}`}
+        >
+          <MessageCircle size={20} /> Chat Equipa
+        </Link>
       </nav>
       
       <div className="p-4 border-t">
@@ -150,6 +166,8 @@ const PageLayout: React.FC = () => {
           <Route path="/suppliers" element={<SuppliersView />} />
           <Route path="/payments" element={<PaymentsView />} />
           <Route path="/employees" element={<EmployeesView />} />
+          <Route path="/time-clock" element={<TimeClockView />} />
+          <Route path="/team-chat" element={<TeamChatView />} />
         </Routes>
       </div>
     </main>

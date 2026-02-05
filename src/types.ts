@@ -318,6 +318,22 @@ export interface AuditLog {
   timestamp: string;
 }
 
+export interface TeamChatMessage {
+  id: string;
+  senderId?: string;
+  senderName: string;
+  text: string;
+  createdAt: string;
+  channel: string;
+}
+
+export interface TeamChatMessageInput {
+  senderId?: string;
+  senderName: string;
+  text: string;
+  channel?: string;
+}
+
 export interface Opportunity {
   id: string;
   clientId: string;
@@ -374,6 +390,24 @@ export enum EmployeeRole {
   SUPPORT = 'Apoio ao Cliente'
 }
 
+export interface EmployeeTimeClockEntry {
+  id: string;
+  type: 'entrada' | 'saida';
+  timestamp: string;
+  source?: 'pin' | 'manual';
+  note?: string;
+}
+
+export interface EmployeeObjective {
+  id: string;
+  title: string;
+  metric: string;
+  targetValue: number;
+  currentValue: number;
+  unit?: string;
+  dueDate?: string;
+}
+
 export interface Employee {
   id: string;
   name: string;
@@ -383,4 +417,13 @@ export interface Employee {
   status: 'Ativo' | 'Inativo' | 'Ausente';
   avatarSeed: string;
   joinedAt: string;
+  primaryTasks: string[];
+  secondaryTasks: string[];
+  workSchedule?: string;
+  workLocation?: string;
+  accessPassword?: string;
+  timeClockPin?: string;
+  timeClockEntries: EmployeeTimeClockEntry[];
+  mission?: string;
+  measurableObjectives: EmployeeObjective[];
 }

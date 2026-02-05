@@ -28,6 +28,7 @@ drop table if exists client_family_members cascade;
 drop table if exists clients cascade;
 
 drop table if exists campaigns cascade;
+drop table if exists team_chat_messages cascade;
 drop table if exists employees cascade;
 drop table if exists pipelines cascade;
 
@@ -56,6 +57,15 @@ create table if not exists employees (
   status text default 'Ativo',
   avatar_seed text,
   joined_at timestamptz default now(),
+  primary_tasks text[] default '{}',
+  secondary_tasks text[] default '{}',
+  work_schedule text,
+  work_location text,
+  access_password text,
+  time_clock_pin text,
+  time_clock_entries jsonb default '[]'::jsonb,
+  mission text,
+  measurable_objectives jsonb default '[]'::jsonb,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -63,6 +73,18 @@ create table if not exists employees (
 create trigger trg_employees_updated_at
 before update on employees
 for each row execute function set_updated_at();
+
+-- =========
+-- Team Chat
+-- =========
+create table if not exists team_chat_messages (
+  id text primary key default gen_random_uuid()::text,
+  sender_id text references employees(id) on delete set null,
+  sender_name text not null,
+  text text not null,
+  channel text default 'geral',
+  created_at timestamptz default now()
+);
 
 -- =========
 -- Clients
